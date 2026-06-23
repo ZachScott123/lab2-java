@@ -18,7 +18,6 @@ public class MemoryBenchmark {
         System.out.println("Baseline memory: " + baselineMemory / 1024 + " KB");
         
         try (PrintWriter writer = new PrintWriter(new FileWriter("memoryB.csv"))) {
-            // CSV Header
             writer.println("Collection,n,TotalBytes,Elements,BytesPerElement");
             
             // Test each collection
