@@ -70,7 +70,51 @@ public class LobsterStream {
     // is empty. Write this yourself; this is part of the assessed coding.
     // ====================================================================
     void execute(int aggressorSide, int size){
-        // TODO: implement the sweep described above.
+        int oppositeSide = -aggressorSide;
+        TreeMap<Long, ArrayDeque<Order>> oppositeBook = side(oppositeSide);
+        
+        while (size > 0 && !oppositeBook.isEmpty()) {
+            
+            Map.Entry<Long, ArrayDeque<Order>> firstEntry = oppositeBook.firstEntry();
+            long price = firstEntry.getKey();
+            ArrayDeque<Order> queue = firstEntry.getValue();
+            
+            while (size > 0 && !queue.isEmpty()) {
+                Order restingOrder = queue.peek();
+                
+                int fillSize = Math.min(size, restingOrder.size);
+                
+                restingOrder.size -= fillSize;
+                size -= fillSize;
+                
+                if (restingOrder.size == 0) {
+                    queue.poll();
+                    
+                    byId.remove(restingOrder.id);
+                    
+                    removeLiveId(restingOrder.id);
+                }
+            }
+            
+            // Remove empty price levels
+            if (queue.isEmpty()) {
+                oppositeBook.remove(price);
+            }
+        }
+    }
+
+    private void removeLiveId(long id) {
+        // Findin g the index of the id
+        int index = liveIds.indexOf(id);
+        if (index != -1) {
+
+            int lastIndex = liveIds.size() - 1;
+            if (index != lastIndex) {
+                liveIds.set(index, liveIds.get(lastIndex));
+            }
+
+            liveIds.remove(lastIndex);
+        }
     }
 
     // ---- generate ONE event on the fly, apply it, then let it be discarded ----
