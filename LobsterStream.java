@@ -1,3 +1,6 @@
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -146,19 +149,102 @@ public class LobsterStream {
         LobsterStream s = new LobsterStream();
         ThreadLocalRandom rng = ThreadLocalRandom.current();
 
-        long events = 0, t0 = System.nanoTime();
-        while (usedBytes() < target){                     // stop when LIVE data reaches the target
-            s.step(rng);                                  // generate + process + discard, all in memory
-            events++;
-            if ((events & 0xFFFFFF) == 0){                // report roughly every 16M events
-                double secs = (System.nanoTime() - t0) / 1e9;
-                System.out.printf("events=%,dM  rate=%,.1fM/s  liveHeap=%,d MB  restingOrders=%,d%n",
-                        events / 1_000_000, (events / 1e6) / secs, usedBytes() / 1_048_576, s.byId.size());
+        try (PrintWriter writer = new PrintWriter(new FileWriter("scaleC.csv"))) {
+            writer.println("RestingOrders,SubmitTime_ns,CancelTime_ns,BestBidLookup_ns,BytesPerOrder");
+            
+            long events = 0;
+            long t0 = System.nanoTime();
+            long checkpointCounter = 0;
+            long checkpointInterval = 50000; // Measure every 50K events
+            
+            long testOrderId = -1;
+            
+            while (usedBytes() < target) {
+                s.step(rng);
+                events++;
+                checkpointCounter++;
+                
+                // measurements at intervals
+                if (checkpointCounter >= checkpointInterval) {
+                    checkpointCounter = 0;
+                    
+                    int restingOrders = s.byId.size();
+                    if (restingOrders == 0) continue;
+                    
+                    // Measure SUBMIT time (do 10 submits and average)
+                    long submitTotal = 0;
+                    long[] submittedIds = new long[10];
+                    for (int i = 0; i < 10; i++) {
+                        int side = rng.nextBoolean() ? 1 : -1;
+                        long price = 10000 + rng.nextInt(1000);
+                        int orderSize = 100 * (1 + rng.nextInt(4));
+                        
+                        long start = System.nanoTime();
+                        s.submit(side, price, orderSize);
+                        long end = System.nanoTime();
+                        submitTotal += (end - start);
+                        submittedIds[i] = s.nextId - 1;
+                    }
+                    long avgSubmitTime = submitTotal / 10;
+                    
+                    // Measure CANCEL time (cancel those 10 orders and average)
+                    long cancelTotal = 0;
+                    for (long id : submittedIds) {
+                        long start = System.nanoTime();
+                        s.cancel(id);
+                        long end = System.nanoTime();
+                        cancelTotal += (end - start);
+                    }
+                    long avgCancelTime = cancelTotal / 10;
+                    
+                    // Measure BEST BID lookup (do 100 lookups and average)
+                    long bidLookupTotal = 0;
+                    for (int i = 0; i < 100; i++) {
+                        long start = System.nanoTime();
+                        Map.Entry<Long, ArrayDeque<Order>> bestBid = s.bids.firstEntry();
+                        long end = System.nanoTime();
+                        bidLookupTotal += (end - start);
+                    }
+                    long avgBidLookupTime = bidLookupTotal / 100;
+                
+                    long memoryUsed = usedBytes();
+                    long bytesPerOrder = memoryUsed / restingOrders;
+                    
+                    // wrtier
+                    writer.printf("%d,%d,%d,%d,%d%n", 
+                        restingOrders, 
+                        avgSubmitTime, 
+                        avgCancelTime, 
+                        avgBidLookupTime, 
+                        bytesPerOrder
+                    );
+                    writer.flush();
+                    
+                    double secs = (System.nanoTime() - t0) / 1e9;
+                    System.out.printf("Checkpoint: orders=%,d  submit=%dns  cancel=%dns  bidLookup=%dns  bytes/order=%,d%n",
+                        restingOrders, avgSubmitTime, avgCancelTime, avgBidLookupTime, bytesPerOrder);
+                }
+                
+                // update
+                if ((events & 0xFFFFFF) == 0) {
+                    double secs = (System.nanoTime() - t0) / 1e9;
+                    System.out.printf("events=%,dM  rate=%,.1fM/s  liveHeap=%,d MB  restingOrders=%,d%n",
+                        events / 1_000_000, 
+                        (events / 1e6) / secs, 
+                        usedBytes() / 1_048_576, 
+                        s.byId.size()
+                    );
+                }
             }
-        }
-        double secs = (System.nanoTime() - t0) / 1e9;
-        System.out.printf("REACHED ~%.0f GB: processed %,d events in %.1fs (%,.1fM events/s), %,d resting orders%n",
+            
+            double secs = (System.nanoTime() - t0) / 1e9;
+            System.out.printf("REACHED ~%.0f GB: processed %,d events in %.1fs (%,.1fM events/s), %,d resting orders%n",
                 gb, events, secs, (events / 1e6) / secs, s.byId.size());
+                
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
 
         // ================================================================
         // TODO 2 (measurement, to instruct Copilot): around the running stream, time how
@@ -166,5 +252,6 @@ public class LobsterStream {
         // grows, and compute bytes-per-resting-order from usedBytes()/byId.size(). Write
         // the figures to scaleC.csv. Keep the generation on the fly; never store events.
         // ================================================================
-    }
+
+        // Terminal code for running -> java -Xms4g -Xmx4g LobsterStream (GB)
 }
