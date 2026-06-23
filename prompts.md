@@ -55,19 +55,47 @@ I provided a comprehensive test main() method with four test scenarios. The firs
 **User asked:**
 Now I need to complete TODO 2 in LobsterStream.java, which requires measuring submit, cancel, and best-bid lookup times as the book grows, and computing bytes-per-resting-order. How do I implement these measurements without disrupting the current running stream or storing events permanently (important)? I need to write everything to a scaleC.csv.
 
-Response summary:
+**Response summary:**
 I provided a complete implementation of TODO 2 that measures all three operations while the book grows to the target size. The implementation uses checkpoint intervals to take measurements periodically. For submit measurement, it submits 10 orders at once and averages the time. For cancel measurement, it immediately cancels those same 10 orders and averages. For best-bid lookup, it performs 100 lookups and averages for stability. Bytes per order is calculated as usedBytes() / byId.size(). All measurement orders are immediately cancelled so they don't affect the book size or stream generation. The results are written to scaleC.csv in the required format with headers for RestingOrders, SubmitTime_ns, CancelTime_ns, BestBidLookup_ns, and BytesPerOrder. The implementation includes progress reporting every 16 million events and checkpoint reporting showing current measurements.
 
 ## Prompt 9
 **User asked:**
 I want to make sure my measurements in TODO 2 are accurate and don't interfere with each other at all / overwrite. Should I use multiple checkpoint intervals to get more data points, and how do I ensure the book is stable when I take measurements? Also, is there any risk that the measurement operations themselves (like submitting and cancelling) will affect the bytes-per-order calculation?
 
-Response summary:
+**Response summary:**
 I explained that using a smaller checkpoint interval (like 50,000 events instead of 100,000) gives more data points and a smoother growth curve. To ensure stability, I suggested taking multiple measurements at each checkpoint (10 submits, 10 cancels, 100 lookups) and averaging them to reduce noise. I also recommended measuring bytes-per-order immediately after the operation measurements, but before any cleanup, to get an accurate snapshot. The measurement operations themselves don't affect the bytes-per-order calculation because submitted orders are immediately cancelled, returning the book to its previous state before the next measurement cycle. I also suggested using System.gc() before each measurement cycle to get cleaner memory readings, though with the caveat that it adds overhead. Finally, I recommended starting measurements only after the book has at least 1,000 orders to avoid noise from small sample sizes, and using a warmup period of 1 million events before starting measurements.
 
 ## Prompt 10
 **User asked:**
 I'm a bit confused about the bytes-per-order calculation in TODO 2. If I use usedBytes() / byId.size(), won't that include all the overhead from the TreeMaps, ArrayDeques, and HashMaps used to store the orders? Shouldn't I subtract a baseline measurement first? And how do I handle the fact that usedBytes() includes the entire heap, not just the order book?
 
-Response summary:
+**Response summary:**
 I explained that yes, usedBytes() includes the entire heap, which is actually what we want - it measures the total memory footprint of the entire order book structure (TreeMaps, ArrayDeques, HashMaps, and all their internal arrays and nodes). I recommended taking a baseline measurement before the book starts growing (immediately after JVM startup) and subtracting it, but noted that this is optional since we're interested in the growth pattern rather than absolute values. I suggested that for more accurate results, you could force GC before each measurement, though this adds overhead and might not reflect normal operation. I also explained that byId.size() is the best measure of resting orders because it's the source of truth for all active orders. The bytes-per-order metric will naturally be larger for structures with more overhead (like TreeMap) and smaller for simple structures (like ArrayDeque), which is exactly the comparison we want to show. I emphasized that the key is consistency - as long as we measure the same way at each checkpoint, the trend will be meaningful even if the absolute values aren't perfect.
+
+## Prompt 11
+**User asked:**
+I need to create MyArrayList.java as a custom implementation that imitates the JDK ArrayList. What methods should I implement and how should I handle the internal array resizing? I want it to have similar O(1) get and amortized O(1) add performance.
+
+**Response summary:**
+I provided a complete MyArrayList.java implementation with an internal Object[] array that doubles in size when full. The class includes a constructor with default capacity of 10, add() method that resizes when necessary using System.arraycopy() for efficient copying, get() method with bounds checking, and size() method. I explained that using System.arraycopy() is more efficient than manual copying because it's a native method optimized by the JVM. I also noted that the resizing strategy (doubling) gives amortized O(1) add performance, matching the JDK implementation. I included error handling for invalid indices and proper type casting with generics.
+
+## Prompt 12
+**User asked:**
+I need to create MyLinkedList.java as a custom implementation that imitates the JDK LinkedList. How do I implement the doubly-linked list structure with Node objects, and what's the best way to handle the addFirst() and get() operations? I need O(1) for addFirst and O(n) for get.
+
+**Response summary:**
+I provided a complete MyLinkedList.java implementation with a static inner Node class containing data, next, and prev references. The class maintains head and tail pointers for O(1) access to both ends. The addFirst() method creates a new Node, links it to the head, and updates pointers in O(1) time. The get() method traverses from the head to the specified index in O(n) time, matching JDK LinkedList behavior. I included proper null checks, size tracking, and bounds validation. I also explained that using a doubly-linked list (with both next and prev pointers) allows for O(1) removal from either end if needed in the future, though we only implement addFirst and get for this lab.
+
+## Prompt 13
+**User asked:**
+I need to create MyHashMap.java as a custom implementation that imitates the JDK HashMap. How do I implement the bucket array with separate chaining for collision handling? I need O(1) average for put() and get() operations.
+
+**Response summary:**
+I provided a complete MyHashMap.java implementation using an array of Entry objects as buckets, with separate chaining for collision resolution using linked lists within each bucket. The Entry inner class stores key, value, and next reference. The put() method calculates the bucket index using hashCode() % buckets.length, handles key updates if the key already exists, and adds new entries to the front of the chain for O(1) average. The get() method traverses the chain at the calculated bucket index to find the key. I included a default capacity of 16 buckets, size tracking, and null handling. I explained that this implementation provides O(1) average performance but can degrade to O(n) in worst-case collisions, exactly matching the JDK behavior. I also noted that for simplicity, this implementation doesn't include resizing (which would maintain the load factor), but it's sufficient for the lab comparison.
+
+## Prompt 14
+**User asked:**
+I'm creating ComparisonBenchmark.java to compare my custom collections against JDK collections. I need help implementing the complete benchmark with all the compare methods for ArrayList, LinkedList, and HashMap. How do I measure both time and memory for each operation across different sizes?
+
+**Response summary:**
+I provided the complete ComparisonBenchmark.java implementation with all compare methods. The benchmark measures get/add/put operations and memory footprint for both JDK and custom collections across sizes from 1,000 to 100,000 elements. Each measurement includes warmup iterations (10,000) and multiple measurement iterations (10,000) for accuracy. Time measurements use System.nanoTime() for precision. Memory measurements use BenchmarkUtils.forceGC() and usedMemoryBytes() to calculate bytes per element. The results are written to compareD.csv with headers for Collection, Operation, n, Time_ns, MemoryBytes, and IsCustom. I included separate methods for each collection type and operation, ensuring fair comparison between JDK and custom implementations. The implementation also handles edge cases like empty collections and bounds checking.
