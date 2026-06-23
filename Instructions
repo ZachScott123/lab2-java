@@ -1,0 +1,453 @@
+
+How this lab works. For every measurement you follow the same four steps: (1) predict the complexity, (2) instruct GitHub Copilot to write the program that measures it, (3) run the program and let it print and save the results, (4) explain what the results show. You never type measured numbers into your report — the program writes them to files you attach. What you write yourself is the predictions, the instructions you gave Copilot, and the explanations.
+
+ 
+
+Exactly what you must hand in — every item is required:
+
+1.  Your program source code, including your own collection classes (Part D) and your completed LobsterStream.java (Part C).
+
+2.  The four files your program generates: timeA.csv, memoryB.csv, scaleC.csv, compareD.csv (plus any plots), and your live resource-monitor output.
+
+3.  The exact instructions you gave Copilot for each part, and your exported Copilot chat log.
+
+4.  Your written predictions and your answers to the Section 7 questions.
+
+5.  A GitHub repository with 5 to 10 incremental commits, and a screenshot of the commit history.
+
+ 
+
+About the LOBSTER data used in this lab.  One part of this lab (Part C) feeds the collections a realistic workload modelled on LOBSTER — an academic dataset created by Ruihong Huang and Tomas Polak in 2011 that reconstructs the complete limit order book of NASDAQ-listed stocks from the exchange’s raw feed of every order submitted, cancelled, and executed, with the state of the book after each event.
+
+How the 50 GB is created.  You do NOT download or store a 50 GB file. The supplied starter code, LobsterStream.java, generates a LOBSTER-like event stream in memory and grows an order book until it fills about 50 GB of RAM. Each event is discarded the moment it is applied, so only the book is kept and nothing is ever written to disk. The full explanation, the run command, and the dataset references are in Part C and Appendix B.
+
+ 
+
+1. Introduction
+The Java Collections framework gives you many ways to store the same data — lists, sets, maps, queues — and they look interchangeable until you measure them. Behind each is a different data structure with different costs for each operation, and your course notes present those costs as Big-O tables: a HashMap lookup is constant time, a TreeMap lookup is logarithmic, and finding an item in a LinkedList is linear. The purpose of this lab is to prove those tables on a real machine.
+
+You will not write the benchmark code by hand, and you will not copy any measured numbers into your report. Instead, you will give GitHub Copilot clear, precise instructions to build a program that measures the structures and prints the results as finished tables and CSV files. Two skills are being assessed: how well you instruct the assistant, and how well you understand the results — enough to predict them in advance and to judge whether what comes back is correct. Understanding is the part that Copilot cannot provide for you.
+
+The lab’s central task is this. Using GitHub Copilot, you will write your own versions of the Java collections — your own list, your own hash map — and then compare them, operation by operation, against the native JDK 21 collections. You measure both your code and the JDK code on the same harness, at the same sizes, and you explain where your implementation matches the library’s time and space complexity and where it falls behind. Everything else in the lab — measuring the JDK structures first, scaling to a large workload — builds toward that comparison.
+
+2. What you will be able to do afterwards
+By the end of this lab, you should be able to:
+
+Using GitHub Copilot, write your own versions of the Java collections, and compare their time and space complexity head-to-head with the native JDK 21 collections.
+Write precise instructions for Copilot that produce a correct, honest measurement program.
+Recognize when generated code measures the wrong thing and correct the instruction until it is correct.
+Predict the Big-O of an operation, then confirm or correct that prediction from the program’s own output.
+Read the machine’s live computing resources — CPU, memory, threads, and garbage collection — from inside your own Java code while it runs.
+Explain why your own implementation matches — or falls short of — the JDK’s complexity, and why.
+3. Background you need (to judge whether the output is right)
+3.1 Reading complexity off a curve
+Plot the time an operation takes against the number of elements n. A horizontal line is constant time, O(1). A straight rising line is linear, O(n). A line that rises then flattens is logarithmic, O(log n). A line curving sharply upward is quadratic, O(n²). The shape is the empirical complexity, and your program will classify it for you — your job is to know whether its guess is believable.
+
+3.2 Space versus real bytes
+Every collection holding n items is O(n) in space, so the class alone says little. What differs is the bytes per element. An ArrayList packs items in one array, so the overhead is tiny; a HashMap wraps each entry in a node and keeps a bucket array with spare slots; a TreeMap gives each entry a node with child and colour pointers. Same O(n), very different real memory.
+
+3.3 What makes a measurement honest
+Four rules, and you must make sure your instruction to Copilot includes every one, then check the generated code obeys them. The JIT compiler only optimises code after thousands of runs, so the first runs are far too slow — warm up first and do not time the warmup. The compiler deletes a result you never use, so the program must add every result into a running total it prints at the end. The garbage collector can pause mid-measurement, so run several times and take the median. And generating or reading the data inside the timed region measures the data, not the operation — build the data first, time only the operation.
+
+3.4 The structures you will measure
+From the framework: the List family (ArrayList, LinkedList) and the double-ended queue ArrayDeque; the Set family (HashSet, LinkedHashSet, TreeSet); the Map family (HashMap, LinkedHashMap, TreeMap); and the heap-backed PriorityQueue. Your notes give the Big-O for each — that table is the prediction you are testing.
+
+ 
+
+ 
+
+4. Setup and ground rules
+Install JDK 21 or newer; the same program runs on Ubuntu, Windows, and macOS. Read any machine fact from Java (for the memory target use Runtime.getRuntime().maxMemory()), never from an operating-system command.
+Create a GitHub repository at the start and work in it throughout. Commit your progress as you go.
+For the large run, start the JVM with a big heap: -Xms52g -Xmx52g on a 64 GB machine, aiming for about 48–50 GB of live data. On a smaller machine, pass a smaller target — the shapes and the bytes-per-element figures are the same.
+Monitor progress with the JDK tools (jstat -gc <pid> 1000) and your system monitor; both behave the same across all platforms.
+5. What you have to do
+There are four measurement parts. In everyone, you predict first, then instruct Copilot, then run and let the program produce the results, then explain. The numbers are the program’s job; the predictions, the instructions, and the explanations are yours.
+
+5.1 How to instruct Copilot well (this is the core skill)
+In plain English, a “prompt” is just the sentence you type to Copilot, telling it what code to write. The clearer and more specific that sentence, the better the code you get back. After Copilot writes the code, read it and check it really did what you asked before you trust its numbers.
+
+A vague instruction such as “benchmark a list” produces code that measures the wrong thing and quietly lies. A good instruction is specific about all of it: which structures, which operations, which sizes of n, that it must warm up before timing, that it must add results into a printed total so nothing is optimised away, that it must build the data before the timed loop, and exactly what output you want — a console table and a CSV file. After Copilot answers, read the code and check it did what you asked; it very often forgets the warmup or times the wrong region. Appendix A gives a worked example instruction and the mistakes to watch for.
+
+Part A — Time complexity
+In plain English:  you are finding out how much longer each operation takes as the collection grows. If doubling the data doubles the time, the operation is O(n); if the time barely changes, it is O(1).
+
+Predict, in your write-up, the Big-O of each operation: get(i), add-at-end, add-at-front, and contains for the lists; add, contains, remove for the sets; put, get, containsKey for the maps; offer, poll, peek for PriorityQueue.
+Instruct Copilot to write a program that, for each structure and operation, builds the structure with n random elements for n = 10³, 10⁴, 10⁵, 10⁶, 10⁷, warms up, times the operation, computes nanoseconds per operation, computes the growth ratio between consecutive sizes, prints its best guess of the Big-O from that ratio, prints a neat table, and writes timeA.csv.
+Run it. Compare the program’s classification with your prediction and with your notes, and explain any difference (Section 7).
+Part B — Real memory footprint
+In plain English:  you are finding out how many bytes each structure uses to hold one item — which is why two structures that are both “O(n) space” can still need very different amounts of real memory.
+
+Instruct Copilot to extend the program: fill each structure with a fixed large number of elements, measure the heap before and after (forcing a collection each time), compute bytes per element, print a table, and write memoryB.csv. Measure one structure at a time and free it before the next.
+Read the bytes-per-element column and note which structures cost far more than others for the same O(n) space.
+Part C — A realistic workload at scale: the LOBSTER-like stream
+In plain English:  instead of plain numbers, you feed the collections a stream of made-up stock-market orders that the program invents as it runs and never saves to disk, and you keep going until the order book fills about 50 GB of memory — then watch how it copes.
+
+What the LOBSTER dataset is. LOBSTER (created by Ruihong Huang and Tomas Polak, 2011) is an academic dataset that reconstructs the complete limit order book of NASDAQ-listed stocks from the exchange’s raw message feed — every order submitted, cancelled, and executed, together with the state of the book after each event. Real data does not arrive as tidy random integers; it arrives as this kind of event stream. Appendix B.1 and the References explain it in full and say where the free real samples are.
+
+How you create 50 GB of LOBSTER-like data. You do not download or store a 50 GB file. The supplied starter code, LobsterStream.java, generates a LOBSTER-like event stream in memory and applies each event to a TreeMap/ArrayDeque/HashMap order book. Because more orders rest than are cancelled, the book grows; you keep the stream running until the book occupies about 50 GB of live RAM. Each event object is discarded the moment it is applied — only the book is kept — so you reach 50 GB of live data without ever writing anything to disk. Run it with a large heap: java -Xms52g -Xmx52g LobsterStream 50. Appendix B explains the starter in full.
+
+If your machine does not have 50 GB of RAM. The target is just a number you pass in, so use a smaller one — the lab works at any size. Set the target to roughly two-thirds of your free RAM and set the heap to match: for example -Xms10g -Xmx10g LobsterStream 8 on a 16 GB laptop. The growth pattern, the garbage-collection behaviour, and the bytes-per-order figure are all the same; only the maximum scale changes. Never set the heap larger than your physical RAM, or the machine will swap to disk and crawl. Appendix B.5 lists settings for common machine sizes.
+
+Complete the starter: implement the execute() matching method (TODO 1) so a marketable order consumes the opposite side of the book by price-time priority.
+Instruct Copilot to add the measurement (TODO 2): time submit, cancel, and a best-bid lookup as the book grows, and compute bytes per resting order, writing the figures to scaleC.csv.
+Run it with a large heap and drive the book to about 50 GB of live data. Watch the events per second, the live heap, and the resting-order count climb, and note when the garbage collector starts working hard. An ArrayList-based book would hit a structural limit near 2.1 billion elements — the TreeMap book does not.
+Add a resource monitor inside your own program: with Copilot, write a background thread that prints the machine’s live resource use once a second while the stream runs — the CPU load, the used heap, the free and total RAM, the number of live threads, and the total garbage-collection count and time. Appendix C gives the JDK 21 calls and a skeleton. Save this output (or take a screenshot) for your submission.
+Part D — Write your own collections with Copilot and compare them with JDK 21
+In plain English:  you build your own list and your own hash map (with Copilot’s help), then run the same speed and memory tests on your versions and on Java’s versions, and explain where yours keeps up and where it falls behind.
+
+This is the central task of the lab. Using GitHub Copilot, you will write your own versions of the Java collections, then measure them head-to-head against the native JDK 21 classes — same operations, same sizes, same harness — for both time and space. Follow these steps exactly:
+
+Choose at least TWO collections to build yourself, each one mirroring a specific JDK 21 class. Recommended pairs: your own MyArrayList compared with java.util.ArrayList; your own MyHashMap (separate chaining) compared with java.util.HashMap; and, if you wish, your own MyTreeMap (binary search tree) compared with java.util.TreeMap.
+Give each of your classes the same core operations as the JDK class it imitates — for a list: add, get(index), contains; for a map: put, get, containsKey — so the comparison is like-for-like.
+Instruct GitHub Copilot to help you write each class from scratch: your own backing array that grows when full, your own bucket array and hash function, your own tree nodes. Read and understand every line — you must be able to explain it in the face-to-face check.
+Run the SAME timing harness from Part A and the SAME memory measurement from Part B on BOTH your class and the JDK class it imitates, across n = 10³ to 10⁷.
+Have the program write compareD.csv: for each operation, your time beside the JDK time, your bytes-per-element beside the JDK’s, and the observed Big-O of each.
+Explain the differences (this part is yours, not Copilot’s). Where does your class match the JDK’s complexity, and where does it fall behind? Your MyArrayList’s add is amortised O(1) only if you grow the array by doubling — grow it by one slot and add becomes O(n). Your MyHashMap’s get is O(1) only with a good hash and a sensible load factor — a weak hash collapses it toward O(n). Your unbalanced MyTreeMap is O(log n) on random keys but O(n) on sorted input, whereas java.util.TreeMap stays balanced and never degrades.
+ 
+
+ 
+
+6. What your program must output
+Do not type any of these numbers by hand. Your program prints each table to the console and saves it as the named CSV file. You attach the CSV files to your submission. The rows below are the columns each file must contain.
+
+ 
+
+timeA.csv — time complexity (Part A)
+Structure
+
+Operation
+
+ns/op @10³
+
+@10⁵
+
+@10⁷
+
+Growth ratio
+
+Program’s Big-O guess
+
+One row per structure-and-operation. The program fills every column.
+
+memoryB.csv — memory footprint (Part B)
+Structure
+
+Elements held
+
+Heap used (MB)
+
+Bytes per element
+
+One row per structure. The program fills every column.
+
+scaleC.csv — the in-memory stream at scale (Part C)
+Resting orders
+
+Live data (GB)
+
+Events processed
+
+Events / sec
+
+Bytes per order
+
+GC / slowdown notes
+
+Your completed stream writes these as it reaches the target; nothing is stored on disk.
+
+compareD.csv — your collections versus JDK 21 (Part D)
+Operation
+
+Your ns/op
+
+JDK ns/op
+
+Your bytes/elem
+
+JDK bytes/elem
+
+Your Big-O
+
+JDK Big-O
+
+One row per operation, for each collection you built. You explain the differences in Section 7; the program produces the numbers.
+
+Optional: let your program draw the graphs
+The tables above are CSV files. To turn them into the curves you discuss in Section 7, you can either open a CSV in a spreadsheet and chart it, or — if you prefer — have your program draw the graphs itself. Instruct Copilot to add charting with a Java library such as XChart or JFreeChart, saving each curve (time per operation against n, on log-log axes, and bytes per element by structure) as a PNG image. Either route is fine; attach whichever plots you produce.
+
+In plain English:  you do not have to draw the graphs by hand. If you want them made for you, ask Copilot to add a chart library and have the program save the curves as image files; otherwise a chart built from the CSV in a spreadsheet is perfectly acceptable.
+
+ 
+
+ 
+
+7. Predict-and-explain questions (this part is yours)
+Answer in a few sentences each, using your program’s output as evidence. These are written by you, not generated.
+
+Before running, you predicted the Big-O of get(i) for ArrayList and LinkedList. Do the timeA.csv curves agree? Describe both shapes and explain what in each structure causes the difference.
+From timeA.csv, which of HashMap.get and TreeMap.get stays flat and which rises with n? Explain what each structure does on a single lookup to produce those shapes.
+From memoryB.csv, pick two structures with the same O(n) space class but very different bytes per element, and explain precisely where the extra bytes go in the costlier one.
+From compareD.csv, where do your own collections match JDK 21’s time and space complexity, and where do they fall behind — and why? Refer to how you grew, hashed, or balanced them.
+8. What to hand in and how it is marked
+Submit through your GitHub repository: your program (including the structure you implemented yourself); the four generated files timeA.csv, memoryB.csv, scaleC.csv, and compareD.csv, plus any plots; the exact instructions you gave Copilot for each part; your written predictions and explanations; a screenshot of your commit history; and your exported Copilot chat log. Marks reward good instructions and real understanding, since the program produces the numbers either way:
+
+Component
+
+Weight
+
+Your own collections and their head-to-head comparison with JDK 21 (Part D, compareD.csv)
+
+30%
+
+Quality and precision of your instructions to Copilot (do they specify warmup, a result sink, sizes, and output?)
+
+15%
+
+A correct program that produces the JDK baselines honestly (timeA.csv, memoryB.csv)
+
+15%
+
+The large in-memory run and what it showed (scaleC.csv)
+
+10%
+
+Predictions and explanations (Section 7)
+
+30%
+
+A precise instruction that yields an honest measurement, plus a clear explanation, is worth far more than a program that merely runs.
+
+9. Version control, Copilot, and academic integrity
+Copilot is the tool you instruct, so the instructions you give it are part of the work and must be submitted alongside the exported chat log. What must be your own are the predictions and the explanations — Copilot may not write those. Keep all your work in a GitHub repository and commit your progress as you go: between 5 and 10 commits with clear messages such as “add timing harness for lists”, “fix warmup loop”, “add memory measurement”. A single end-of-session commit dumping everything at once is a red flag, not a submission. Include a screenshot of the commit history and your full Copilot chat log.
+
+A submission without the repository link, the incremental commit history, and the exported Copilot chat log will not be marked. A random selection of submissions will be discussed face to face; any code or explanation you cannot account for will not count, whatever the logs appear to show.
+
+ 
+
+ 
+
+Appendix A — How to instruct Copilot for this lab
+A.1 What a good instruction contains
+Before you type a prompt, make sure it names every one of these. A prompt missing any of them will produce a benchmark that lies:
+
+the exact structures and operations to measure;
+the sizes of n to test, written out;
+that the data must be built before timing, with elements generated on the fly, never read from disk in a timed loop;
+that it must warm up first and not time the warmup;
+that every result must be added into a total it prints at the end, so nothing is optimised away;
+the exact output you want: a console table and a named CSV file.
+A.2 A worked example instruction
+This is the kind of prompt that produces a trustworthy Part A program. Adapt it for the sets, the maps, and the priority queue.
+
+Write a Java program that measures the time per operation of ArrayList,
+
+LinkedList, and ArrayDeque. For each structure and for get(index),
+
+add-at-end, add-at-front, and contains:
+
+  - build the structure with n random Integers, generated on the fly,
+
+    for n = 1_000, 10_000, 100_000, 1_000_000, 10_000_000;
+
+  - run 1,000,000 operations as an untimed warm-up;
+
+  - then time 1,000,000 operations with System.nanoTime();
+
+  - add every result into a long 'sink' and print it at the end,
+
+    so the JIT cannot delete the loop;
+
+  - report nanoseconds per operation;
+
+  - compute the ratio of ns/op between each size and the next, and from
+
+    it print a guessed Big-O (about 1x -> O(1), about 2x -> O(n),
+
+    small and shrinking -> O(log n));
+
+  - print a neat table AND write the same rows to timeA.csv with a header.
+
+Do not read any data from disk inside a timed loop.
+
+A.3 Mistakes Copilot makes that you must catch
+No warm-up, or it times the warm-up too — the first runs will look far slower than the truth.
+It times the building of the structure instead of the operation — read the code and check what sits inside the timed block.
+It never uses the result, so the JIT deletes the work and you get impossibly fast times — insist on the printed sink.
+It shares one Random across everything or reads input in the loop — both distort the timing.
+It forgets to write the CSV, or writes it without a header — you need the file to attach.
+A.4 How to know the output is trustworthy
+An O(1) operation’s ns/op should barely change as n grows; if it climbs steeply, something is wrong.
+Run the program twice — the ns/op figures should be close; wild swings mean the garbage collector or warm-up is interfering.
+Bytes-per-element should land in a sane range (tens of bytes for simple structures); a tiny or enormous figure means the measurement is off.
+ 
+
+ 
+
+Appendix B — The in-memory LOBSTER-like data stream
+Part C uses starter code, LobsterStream.java, supplied with this lab. It simulates a stream of limit-order-book events — the kind a real exchange feed (such as LOBSTER’s NASDAQ data) produces — and feeds them through Java collections, all in memory. This appendix explains how it works, what you complete, and how to run it.
+
+B.1 What the LOBSTER dataset is
+LOBSTER (Limit Order Book System for Efficient Reconstruction) is an academic data tool that rebuilds the complete limit order book of NASDAQ-listed stocks from the exchange’s raw message feed. It was created by Ruihong Huang and Tomas Polak in 2011 and has supplied high-frequency data to the research community since 2013. It takes NASDAQ’s Historical TotalView-ITCH feed — the timestamped record of every order submission, cancellation, and execution — and replays it to reconstruct what the book looked like, at every price level, after each event.
+
+The data arrives as two paired files per stock per day. The message file has six columns: the time (seconds after midnight, to nanosecond precision), the event type (new limit order, cancellation, deletion, or execution), the order id, the size, the price (quoted in dollars multiplied by 10,000 so it stays a whole number), and the direction (buy or sell). The orderbook file lists, after each message, the price and size at each of the top levels on both sides. Message row k is the event that turns book row k−1 into book row k, so the two files together form a complete, self-checking history.
+
+Free academic samples cover five large NASDAQ stocks — Apple, Amazon, Google, Intel, and Microsoft — for a single trading day, with roughly 300,000 to 600,000 events each; access to other stocks and dates needs an account. The dataset is widely used in market microstructure and machine learning research on high-frequency markets. The references at the end of this document point to the real dataset and its file-format documentation if you want to explore it. Our starter code does not download any of this — it simulates a stream with the same event types and shape, in memory, so you can study the collections under a realistic order-flow workload at any scale, with no internet access and nothing stored.
+
+B.2 The idea: 50 GB processed, nothing stored
+The program never writes a file and never reads one. In a tight loop it generates one event, applies it to the order book, and lets the event object be garbage-collected. The events are ephemeral; only the book’s state stays in memory. So, the amount of data processed can run into many tens of gigabytes, while the live memory is simply the size of the book. You drive the book until its live data reaches your target (about 50 GB) and measure it there. Generating on the fly rather than reading a file also helps keep the timing honest — a disk read inside a measured loop would dwarf the operation you are trying to time.
+
+B.3 The collections inside it (the structures you are studying)
+Two TreeMaps — one per side of the book, keyed by price so the best price is always at one end; each insert, cancel, and best-price lookup is O(log n).
+An ArrayDeque at every price level — the FIFO queue of orders resting at that price, with O(1) work at both ends, giving price-time priority.
+A HashMap from order id to order, so a cancellation finds its order in O(1) average instead of searching the book.
+B.4 What you complete
+In plain English:  two jobs are left for you in the starter file: write the matching logic yourself, and ask Copilot to add the timing measurements. Everything else in the file already works.
+
+TODO 1 — matching (your coding). Implement execute(): a marketable order consumes orders at the best prices on the opposite side, in price-time order, reducing or removing filled orders, dropping emptied price levels, and removing fully filled orders from the id map. This is the coding the lab requires of you in Part C.
+TODO 2 — measurement (instruct Copilot). Time how long submit, cancel, and a best-bid lookup (bids.firstEntry()) take as the book grows, and compute bytes per resting order from used heap divided by the order count. Write these to scaleC.csv. Tell Copilot explicitly to keep generating on the fly and never to store the events.
+B.5 How to run it
+Give the JVM a large, fixed heap and pass the target size in gigabytes. The same code runs on any machine — pass a smaller number on a smaller one; the behaviour is the same, only the ceiling moves.
+
+javac LobsterStream.java
+
+java -Xms52g -Xmx52g LobsterStream 50      # 50 = target GB; use less on a smaller machine
+
+ 
+
+# watch it live, in another terminal:
+
+jps                       # find the process id
+
+jstat -gc <pid> 1000      # heap and garbage-collection every second
+
+Match the heap to your machine — the lab works at any size, only the ceiling moves:
+
+64 GB machine:  -Xms52g -Xmx52g  with target 50
+32 GB machine:  -Xms24g -Xmx24g  with target 22
+16 GB machine:  -Xms10g -Xmx10g  with target 8
+8 GB machine:   -Xms5g  -Xmx5g   with target 4
+The rule: keep the heap below your physical RAM (leave about a quarter for the operating system and the JVM), and set the target a little below the heap. If the target is larger than the heap the program cannot reach it and will stop with an OutOfMemoryError — which, if you want it to, is itself a clean demonstration of the machine’s hard ceiling.
+
+B.6 The heart of the starter
+The full file is supplied; this is its core so you can see the shape. The book is the three collections; step() makes one event and applies it; the loop in main runs until live memory hits the target.
+
+final TreeMap<Long,ArrayDeque<Order>> bids = new TreeMap<>(Collections.reverseOrder());
+
+final TreeMap<Long,ArrayDeque<Order>> asks = new TreeMap<>();
+
+final HashMap<Long,Order> byId = new HashMap<>();      // id -> order, for fast cancel
+
+ 
+
+void step(ThreadLocalRandom rng){
+
+    mid += rng.nextInt(-3,4);                          // mid drifts
+
+    double r = rng.nextDouble();
+
+    if (r < 0.62) submit(side, price, size);           // mostly submits -> book grows
+
+    else if (r < 0.95) cancel(randomLiveId());          // some cancels
+
+    else execute(aggressorSide, size);                  // a few executions  (TODO 1)
+
+}
+
+ 
+
+while (usedBytes() < target){    // target = e.g. 50 GB
+
+    s.step(rng);                 // generate + process + discard, all in memory
+
+    events++;                    // events processed climbs without bound; live memory = the book
+
+}
+
+B.7 Using all the cores (optional extension)
+One stream saturates one core. To use the whole machine, run several independent books — one per core — each on its own thread with its own ThreadLocalRandom, and sum their live memory toward the target. Instruct Copilot to add this only after the single-threaded version measures correctly; a parallel version that double-counts memory or shares a generator will mislead you.
+
+ 
+
+ 
+
+Appendix C — Reading the machine’s resources from your own code (JDK 21)
+Part C asks your program to report the machine’s resource use live, from inside the program, while the workload runs — not only from an external monitor. Java exposes this through the management beans in java.lang.management and the com.sun.management extension. Instruct Copilot to build a small background “monitor” thread that samples and prints these figures once a second.
+
+In plain English:  your program watches itself. Every second it prints how much CPU it is using, how much memory is filled, how many threads are alive, and how hard the garbage collector is working, so you can see the resources climb as the order book grows.
+
+C.1 What to report, and where each number comes from
+Number of processors — Runtime.getRuntime().availableProcessors().
+CPU load of your program (0 to 1; multiply by 100 for a percentage) — com.sun.management.OperatingSystemMXBean.getProcessCpuLoad(); the whole machine’s load is getCpuLoad().
+Used heap memory — ManagementFactory.getMemoryMXBean().getHeapMemoryUsage().getUsed().
+Total and free physical RAM — OperatingSystemMXBean.getTotalMemorySize() and getFreeMemorySize() (these are the JDK 21 names).
+Live thread count — ManagementFactory.getThreadMXBean().getThreadCount().
+Garbage-collection count and time — sum getCollectionCount() and getCollectionTime() over ManagementFactory.getGarbageCollectorMXBeans().
+C.2 A monitor you can build on
+Start this once, on a background (daemon) thread, before the workload begins. It prints a line a second until you stop the program.
+
+import java.lang.management.*;
+
+import com.sun.management.OperatingSystemMXBean;   // the com.sun version exposes CPU + RAM
+
+ 
+
+OperatingSystemMXBean os = (OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
+
+MemoryMXBean memory      = ManagementFactory.getMemoryMXBean();
+
+ThreadMXBean threadBean  = ManagementFactory.getThreadMXBean();
+
+var gcBeans              = ManagementFactory.getGarbageCollectorMXBeans();
+
+int cores = Runtime.getRuntime().availableProcessors();
+
+ 
+
+Thread monitor = new Thread(() -> {
+
+    try {
+
+        while (running) {                                   // 'running' is a volatile boolean
+
+            double cpuPct   = os.getProcessCpuLoad() * 100;  // CPU this JVM is using
+
+            long usedHeapMB = memory.getHeapMemoryUsage().getUsed() >> 20;
+
+            long freeRamMB  = os.getFreeMemorySize()  >> 20;
+
+            long totalRamMB = os.getTotalMemorySize() >> 20;
+
+            int  threads    = threadBean.getThreadCount();
+
+            long gcCount = 0, gcTimeMs = 0;
+
+            for (GarbageCollectorMXBean gc : gcBeans) {
+
+                gcCount  += gc.getCollectionCount();
+
+                gcTimeMs += gc.getCollectionTime();
+
+            }
+
+            System.out.printf("cpu=%.0f%%  heap=%,dMB  freeRAM=%,d/%,dMB  threads=%d  gc=%d (%,dms)%n",
+
+                    cpuPct, usedHeapMB, freeRamMB, totalRamMB, threads, gcCount, gcTimeMs);
+
+            Thread.sleep(1000);                              // sample once a second
+
+        }
+
+    } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+
+});
+
+monitor.setDaemon(true);
+
+monitor.start();
+
+C.3 Reading the numbers
+CPU near 100% on one core means your single-threaded program is working flat out; to use more cores you would run several streams in parallel (Appendix B.7).
+Used heap climbing toward your target is the book filling memory; if it plateaus while GC time shoots up, the collector is struggling to keep up — note where that happens.
+Free RAM falling toward zero is the real ceiling; if it reaches zero the machine starts swapping to disk and everything slows to a crawl.
+ 
